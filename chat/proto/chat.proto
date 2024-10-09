@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package chatter;
+
+service ChatService { rpc JoinRoom(JoinRequest) returns (JoinResponse); }
+
+message JoinRequest { string username = 1; }
+
+message JoinResponse {}
