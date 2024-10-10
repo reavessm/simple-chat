@@ -23,8 +23,11 @@ impl ChatService for ChatServer {
         let username = &request.get_ref().username;
 
         if self.usernames.read().await.contains(username) {
+            println!("Could not add {username} ...");
             return Err(Status::new(Code::AlreadyExists, "username already exists"));
         }
+
+        println!("{username} is joining");
 
         self.usernames.write().await.insert(username.clone());
 
