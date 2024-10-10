@@ -2,8 +2,28 @@ syntax = "proto3";
 
 package chatter;
 
-service ChatService { rpc JoinRoom(JoinRequest) returns (JoinResponse); }
+service ChatService {
+  rpc JoinRoom(JoinRequest) returns (JoinResponse);
+  rpc LeaveRoom(LeaveRequest) returns (LeaveResponse);
+  // rpc Message(stream ClientMessage) returns (stream ServerMessage);
+}
 
 message JoinRequest { string username = 1; }
 
-message JoinResponse {}
+message JoinResponse { string id = 1; }
+
+message LeaveRequest { string id = 1; }
+
+message LeaveResponse {}
+
+// message ClientMessage {
+//   string id = 1;
+//   string username = 2;
+//   string message = 3;
+// }
+//
+// message ServerMessage {
+//   string username = 1;
+//   string message = 2;
+//   string timestamp = 3;
+// }
