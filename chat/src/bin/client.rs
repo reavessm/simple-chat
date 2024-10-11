@@ -73,10 +73,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let message = line.trim().to_string();
 
             // Handle exiting by alerting another thread to do the clean up.
-            if message == "exit" {
+            if message == "leave" {
                 drop(exit_tx.send(()));
                 return;
             }
+
+            let message = message.strip_prefix("send ");
+            if message.is_none() {
+                eprintln!("ERROR: Invalid message.  Must be of the form 'leave' or 'send <msg>'");
+                let _ = io_tx.send(prompt.into()).await;
+                continue;
+            }
+            let message = message.unwrap().to_string();
 
             let message_request = ClientMessage {
                 message,
