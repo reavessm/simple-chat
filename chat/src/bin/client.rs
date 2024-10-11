@@ -140,7 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             // \r should clear the line before printing.  Then
                             // we put the prompt back and the user is
                             // none-the-wiser!
-                            let _ = io_tx_clone.send(format!("\r{:>.10}> {}\n> ", resp.username, resp.message)).await;
+                            let _ = io_tx_clone.send(cformat!("\r<green>{:>.10}</green>> {}\n> ", resp.username, resp.message)).await;
                         },
                         Err(e) => {
                             eprintln!("ERROR! {:?}", e);
