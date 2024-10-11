@@ -18,6 +18,11 @@ use chatter::{
     ClientMessage, JoinRequest, JoinResponse, LeaveRequest, LeaveResponse, ServerMessage,
 };
 
+/// UserMappings stores a set of usernames and a mapping from id to username.
+/// The set of usernames maintains uniqueness, and the UUID maintains a (weak)
+/// sense of "security" that the message came from the client.  Every client
+/// can see any other client's username, but not their UUID.  A client's UUID
+/// should be treated like a session token.
 #[derive(Debug, Default)]
 pub struct UserMappings {
     usernames: HashSet<String>,
@@ -26,19 +31,28 @@ pub struct UserMappings {
 
 #[derive(Debug)]
 pub struct ChatServer {
+    /// List of connected clients.
     user_mappings: RwLock<UserMappings>,
+
+    /// Pipes to send messages to clients.
     user_streams: Arc<RwLock<HashMap<Uuid, Sender<Result<ServerMessage, Status>>>>>,
+
+    /// Relayable messages.
     messages_sender: Sender<(Uuid, ServerMessage)>,
 }
 
 #[tonic::async_trait]
 impl ChatService for ChatServer {
+    /// join_room handles the initial request from the client to enter the
+    /// chat.  They should be able to recieve messages once this succeeds.
     async fn join_room(
         &self,
         request: Request<JoinRequest>,
     ) -> Result<Response<JoinResponse>, Status> {
         let username = &request.get_ref().username;
         let mut username = username.to_string();
+
+        // TODO: Make this configurable?
         username.truncate(10);
 
         if self
@@ -56,6 +70,7 @@ impl ChatService for ChatServer {
 
         println!("{username} is joining");
 
+        // Store username and unique id.
         {
             let mut guard = self.user_mappings.write().await;
 
@@ -66,6 +81,9 @@ impl ChatService for ChatServer {
         Ok(Response::new(JoinResponse { id: user_id.into() }))
     }
 
+    /// A parting-shot that a client sends as it exits cleanly.  All clean-up
+    /// should happen here and we shouldn't expect any messages from this
+    /// client until they rejoin.
     async fn leave_room(
         &self,
         request: Request<LeaveRequest>,
@@ -88,19 +106,28 @@ impl ChatService for ChatServer {
         Ok(Response::new(LeaveResponse::default()))
     }
 
+    // holy type signature batman!
     type MessageStream =
         Pin<Box<dyn Stream<Item = Result<ServerMessage, Status>> + Send + 'static>>;
 
+    /// message handles receiving messages from a client.  The client should
+    /// have already joined by this point.  This method opens bidirectional
+    /// channel with the client.  Any incoming messages will be relayed to all
+    /// other clients, not including the sender.
     async fn message(
         &self,
         request: Request<Streaming<ClientMessage>>,
     ) -> Result<Response<Self::MessageStream>, Status> {
+        // grab gRPC channel
         let mut stream = request.into_inner();
 
+        // handle first message before loop to setup routing
         let Ok(Some(msg)) = stream.message().await else {
             return Err(Status::unknown("Unkown error"));
         };
 
+        // This is done separetely because it only needs to be done once, not
+        // on every message.
         let (username, id, message) = {
             let guard = self.user_mappings.read().await;
 
@@ -130,26 +157,23 @@ impl ChatService for ChatServer {
 
         println!("{} {}: {}", timestamp.clone(), username, message);
 
+        // Create channel to give to client.
         let output_stream = async_stream::stream! {
             while let Some(msg) = rx.recv().await {
                 yield msg;
             }
         };
 
-        // TODO: Add stream to server
-
-        // {
-        //     // let mut guard = self.user_streams.write().await;
-        //     //
-        //     // guard.insert(id, tx.into());
-        // }
+        // Store one end of the client channel so we can relay messages into
+        // it.
         self.user_streams.write().await.insert(id, tx.into());
 
+        // For every message we recieve, send to every other client.  The
+        // actual sending happens in `relay`, but this sends the message to the
+        // relay.
         let sender = self.messages_sender.clone();
-
         let _ = tokio::spawn(async move {
             while let Ok(msg) = stream.message().await {
-                println!("Looping");
                 if msg.is_none() {
                     println!("no msg");
                     break;
@@ -178,11 +202,14 @@ impl ChatService for ChatServer {
             }
         });
 
+        // Send loose end of channel to client.
         Ok(Response::new(Box::pin(output_stream) as Self::MessageStream))
     }
 }
 
 impl ChatServer {
+    /// remove_user is a general function to clean up the housekeeping related
+    /// to removing a user.
     async fn remove_user(&self, uuid: Uuid) -> Result<(), Status> {
         println!("Removing");
         if !self
@@ -215,10 +242,11 @@ impl ChatServer {
     }
 }
 
-async fn relay(
-    mut server_receiver: Receiver<(Uuid, ServerMessage)>,
-    client_streams: Arc<RwLock<HashMap<Uuid, Sender<Result<ServerMessage, Status>>>>>,
-) {
+type ClientStream = Arc<RwLock<HashMap<Uuid, Sender<Result<ServerMessage, Status>>>>>;
+
+/// relay receives messages from the server and asynchronously sends them to
+/// each client.
+async fn relay(mut server_receiver: Receiver<(Uuid, ServerMessage)>, client_streams: ClientStream) {
     while let Some((sender_id, msg)) = server_receiver.recv().await {
         {
             let guard = client_streams.read().await;
@@ -235,6 +263,7 @@ async fn relay(
 
                 handles.push(handle);
             }
+
             let _ = future::join_all(handles).await;
         }
     }
@@ -250,8 +279,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         user_mappings: Default::default(),
     };
 
+    // Set up internal streams.
     let client_streams = server.user_streams.clone();
-
     let server_handle = tokio::spawn(async move {
         relay(rx, client_streams).await;
     });

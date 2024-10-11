@@ -12,33 +12,34 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Set up internal streams.
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let (exit_tx, mut exit_rx) = tokio::sync::mpsc::channel(1);
+    let (io_tx, mut io_rx) = tokio::sync::mpsc::channel::<String>(10);
+    let io_tx_clone = io_tx.clone();
+
     let mut client = ChatServiceClient::connect("http://127.0.0.1:8080").await?;
 
     let mut username = String::new();
-
     print!("Please enter a username: ");
     stdout().flush()?;
     stdin().read_line(&mut username)?;
 
+    // remove newlines
     let username = username.trim().to_string();
 
     let request = tonic::Request::new(JoinRequest {
         username: username.clone(),
     });
 
+    // Enter chat room to receive messages.
     let response = client.join_room(request).await?;
+    let id = response.get_ref().id.clone();
 
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    let (exit_tx, mut exit_rx) = tokio::sync::mpsc::channel(1);
-    let (io_tx, mut io_rx) = tokio::sync::mpsc::channel::<String>(10);
-    let io_tx_clone = io_tx.clone();
-
-    let response = std::sync::Arc::new(response);
-    let response_clone = std::sync::Arc::clone(&response);
-
+    // Send initial message to get channel from server
     let initial_message_text = "JOINING";
     let initial_message = ClientMessage {
-        id: response.get_ref().clone().id,
+        id: id.clone(),
         username: username.clone(),
         message: initial_message_text.to_string(),
     };
@@ -49,6 +50,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err(err_msg.into());
     }
 
+    // Spawn a thread to handle printing to the screen.  This can come from our
+    // client or from the server so we use an internal channel.
     let print_handle = tokio::spawn(async move {
         let mut stdout = tokio::io::stdout();
         while let Some(message) = io_rx.recv().await {
@@ -57,8 +60,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // Handle user input
+    let id_clone = id.clone();
     let input_handle = tokio::spawn(async move {
-        let id = &response_clone.get_ref().id;
         let stdin = tokio::io::stdin();
         let mut stdin_reader = tokio::io::BufReader::new(stdin).lines();
 
@@ -68,6 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         while let Ok(Some(line)) = stdin_reader.next_line().await {
             let message = line.trim().to_string();
 
+            // Handle exiting by alerting another thread to do the clean up.
             if message == "exit" {
                 let _ = exit_tx.send(());
                 return;
@@ -75,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let message_request = ClientMessage {
                 message,
-                id: id.clone(),
+                id: id_clone.clone(),
                 username: username.clone(),
             };
 
@@ -95,6 +100,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?
         .into_inner();
 
+    // Handle replies from other clients
     let reply_handle = tokio::spawn(async move {
         pin_mut!(response_stream);
 
@@ -104,6 +110,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Some(response) = response_stream.next() => {
                     match response {
                         Ok(resp) => {
+                            // \r should clear the line before printing.  Then
+                            // we put the prompt back and the user is
+                            // none-the-wiser!
                             let _ = io_tx_clone.send(format!("\r{:>.10}> {}\n> ", resp.username, resp.message)).await;
                         },
                         Err(e) => {
@@ -119,42 +128,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let _ = futures::join!(reply_handle, input_handle, print_handle);
 
-    let request = tonic::Request::new(LeaveRequest {
-        id: response.get_ref().id.to_string(),
-    });
-
+    // Leave the room only after all the threads have returned.
+    let request = tonic::Request::new(LeaveRequest { id });
     let _ = client.leave_room(request).await?;
 
     Ok(())
 }
-
-// async fn handle_message(username: String, id: String) -> impl Stream<Item = ClientMessage> {
-//     async_stream::stream! {
-//         // loop {
-//             let username = username.clone();
-//             let id = id.clone();
-//
-//             print!("> ");
-//             stdout().flush()?;
-//
-//             let mut message = String::new();
-//             stdin().read_line(&mut message)?;
-//             let message = message.trim().to_string();
-//
-//             if message == "exit" {
-//                 yield Err(Status::new(Code::Unknown, ""));
-//                 return;
-//             } //else {
-//
-//                 yield Ok(ClientMessage{ id, username, message });
-//             // }
-//
-//         // }
-//     }
-//     .filter_map(|item| async {
-//         match item {
-//             Ok(value) => Some(value),
-//             Err(_) => None,
-//         }
-//     })
-// }
