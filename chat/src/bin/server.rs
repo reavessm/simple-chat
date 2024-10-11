@@ -1,5 +1,6 @@
 use futures::future;
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -176,7 +177,6 @@ impl ChatService for ChatServer {
         let forward_result = tokio::spawn(async move {
             while let Ok(msg) = stream.message().await {
                 if msg.is_none() {
-                    println!("no msg");
                     break;
                 }
 
@@ -215,7 +215,6 @@ impl ChatServer {
     /// remove_user is a general function to clean up the housekeeping related
     /// to removing a user.
     async fn remove_user(&self, uuid: Uuid) -> Result<(), Status> {
-        println!("Removing");
         if !self
             .user_mappings
             .read()
@@ -273,7 +272,16 @@ async fn relay(mut server_receiver: Receiver<(Uuid, ServerMessage)>, client_stre
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let addr = "0.0.0.0:8080".parse()?;
+    let host = match env::var("SERVER_HOST") {
+        Ok(h) => h,
+        Err(_) => "0.0.0.0".to_string(),
+    };
+    let port = match env::var("SERVER_PORT") {
+        Ok(p) => p,
+        Err(_) => "8080".to_string(),
+    };
+    let addr = format!("{host}:{port}").parse()?;
+
     let (tx, rx) = tokio::sync::mpsc::channel(10);
     let server = ChatServer {
         messages_sender: tx,

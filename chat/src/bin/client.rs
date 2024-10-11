@@ -2,31 +2,50 @@ pub mod chatter {
     tonic::include_proto!("chatter");
 }
 
-use std::io::{stdin, stdout, Write};
-
 use chatter::chat_service_client::ChatServiceClient;
 use chatter::{ClientMessage, JoinRequest, LeaveRequest};
+use color_print::cformat;
 use futures::pin_mut;
 use futures::stream::StreamExt;
+use std::env;
+use std::io::{stdin, stdout, Write};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let host = env::var("SERVER_HOST");
+    if let Err(e) = host {
+        eprintln!("Please set SERVER_HOST");
+        return Err(e.into());
+    }
+    let port = env::var("SERVER_PORT");
+    if let Err(e) = port {
+        eprintln!("Please set SERVER_PORT");
+        return Err(e.into());
+    }
+    let host = host.unwrap();
+    let port = port.unwrap();
+
+    let username = match env::args().nth(1) {
+        Some(u) => u,
+        None => {
+            let mut u = String::new();
+            print!("Please enter a username: ");
+            stdout().flush()?;
+            stdin().read_line(&mut u)?;
+
+            // remove newlines
+            u.trim().to_string()
+        }
+    };
+
     // Set up internal streams.
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let (exit_tx, mut exit_rx) = tokio::sync::mpsc::channel(1);
     let (io_tx, mut io_rx) = tokio::sync::mpsc::channel::<String>(10);
     let io_tx_clone = io_tx.clone();
 
-    let mut client = ChatServiceClient::connect("http://127.0.0.1:8080").await?;
-
-    let mut username = String::new();
-    print!("Please enter a username: ");
-    stdout().flush()?;
-    stdin().read_line(&mut username)?;
-
-    // remove newlines
-    let username = username.trim().to_string();
+    let mut client = ChatServiceClient::connect(format!("http://{host}:{port}")).await?;
 
     let request = tonic::Request::new(JoinRequest {
         username: username.clone(),
