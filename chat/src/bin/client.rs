@@ -74,7 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Handle exiting by alerting another thread to do the clean up.
             if message == "exit" {
-                let _ = exit_tx.send(());
+                drop(exit_tx.send(()));
                 return;
             }
 

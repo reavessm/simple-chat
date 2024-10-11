@@ -17,8 +17,10 @@ use chatter::chat_service_server::{ChatService, ChatServiceServer};
 use chatter::{
     ClientMessage, JoinRequest, JoinResponse, LeaveRequest, LeaveResponse, ServerMessage,
 };
+type ClientStream = Arc<RwLock<HashMap<Uuid, Sender<Result<ServerMessage, Status>>>>>;
 
 /// UserMappings stores a set of usernames and a mapping from id to username.
+///
 /// The set of usernames maintains uniqueness, and the UUID maintains a (weak)
 /// sense of "security" that the message came from the client.  Every client
 /// can see any other client's username, but not their UUID.  A client's UUID
@@ -35,7 +37,8 @@ pub struct ChatServer {
     user_mappings: RwLock<UserMappings>,
 
     /// Pipes to send messages to clients.
-    user_streams: Arc<RwLock<HashMap<Uuid, Sender<Result<ServerMessage, Status>>>>>,
+    //user_streams: Arc<RwLock<HashMap<Uuid, Sender<Result<ServerMessage, Status>>>>>,
+    user_streams: ClientStream,
 
     /// Relayable messages.
     messages_sender: Sender<(Uuid, ServerMessage)>,
@@ -99,9 +102,7 @@ impl ChatService for ChatServer {
 
         let id = id.unwrap();
 
-        if let Err(reason) = self.remove_user(id).await {
-            return Err(reason);
-        }
+        self.remove_user(id).await?;
 
         Ok(Response::new(LeaveResponse::default()))
     }
@@ -166,13 +167,13 @@ impl ChatService for ChatServer {
 
         // Store one end of the client channel so we can relay messages into
         // it.
-        self.user_streams.write().await.insert(id, tx.into());
+        self.user_streams.write().await.insert(id, tx);
 
         // For every message we recieve, send to every other client.  The
         // actual sending happens in `relay`, but this sends the message to the
         // relay.
         let sender = self.messages_sender.clone();
-        let _ = tokio::spawn(async move {
+        let forward_result = tokio::spawn(async move {
             while let Ok(msg) = stream.message().await {
                 if msg.is_none() {
                     println!("no msg");
@@ -201,6 +202,9 @@ impl ChatService for ChatServer {
                 }
             }
         });
+
+        // drive and ignore
+        drop(forward_result);
 
         // Send loose end of channel to client.
         Ok(Response::new(Box::pin(output_stream) as Self::MessageStream))
@@ -241,8 +245,6 @@ impl ChatServer {
         Ok(())
     }
 }
-
-type ClientStream = Arc<RwLock<HashMap<Uuid, Sender<Result<ServerMessage, Status>>>>>;
 
 /// relay receives messages from the server and asynchronously sends them to
 /// each client.
