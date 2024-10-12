@@ -3,6 +3,10 @@ name = "chat"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "chatter_lib"
+path = "src/lib/mod.rs"
+
 [[bin]]
 name = "server"
 path = "src/bin/server.rs"
@@ -25,3 +29,6 @@ uuid = { version = "1.10.0", features = ["fast-rng", "v4"] }
 
 [build-dependencies]
 tonic-build = "0.12"
+
+[dev-dependencies]
+serial_test = "3.1.1"

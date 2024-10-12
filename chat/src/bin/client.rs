@@ -1,9 +1,5 @@
-pub mod chatter {
-    tonic::include_proto!("chatter");
-}
-
-use chatter::chat_service_client::ChatServiceClient;
-use chatter::{ClientMessage, JoinRequest, LeaveRequest};
+use chatter_lib::chatter::chat_service_client::ChatServiceClient;
+use chatter_lib::chatter::{ClientMessage, JoinRequest, LeaveRequest};
 use color_print::cformat;
 use futures::pin_mut;
 use futures::stream::StreamExt;
