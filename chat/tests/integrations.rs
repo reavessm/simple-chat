@@ -7,7 +7,7 @@ use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tonic::transport::Server;
-use tonic::Request;
+use tonic::{Code, Request};
 
 // This keeps things simple but ultimately means the tests need to be run
 // serially to avoid multiple servers binding to the same port.
@@ -79,6 +79,40 @@ async fn join_room_ok() {
     let response = client.join_room(request).await;
 
     assert!(response.is_ok());
+
+    let _ = exit_tx.send(());
+    let _ = server_handle.await;
+}
+
+#[tokio::test]
+#[serial]
+async fn join_room_err() {
+    let (server_handle, _relay_handle, exit_tx) = default_server();
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let mut client = ChatServiceClient::connect(format!("http://{ADDR}"))
+        .await
+        .unwrap();
+
+    let username = "foo";
+    let request = Request::new(JoinRequest {
+        username: username.into(),
+    });
+
+    let response = client.join_room(request).await;
+    assert!(response.is_ok());
+
+    let mut bad_client = ChatServiceClient::connect(format!("http://{ADDR}"))
+        .await
+        .unwrap();
+
+    let bad_request = Request::new(JoinRequest {
+        username: username.into(),
+    });
+    let bad_response = bad_client.join_room(bad_request).await;
+    assert!(bad_response.is_err());
+    assert_eq!(bad_response.unwrap_err().code(), Code::AlreadyExists,);
 
     let _ = exit_tx.send(());
     let _ = server_handle.await;
