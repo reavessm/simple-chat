@@ -8,4 +8,6 @@ the user types 'send <msg>' the message will be sent to all other connected
 clients.  Any messages from other clients will show their username as well as
 their message to the screen.
 
-![Demo video](static/ddn-simple-chat-demo.mkv)
+## Demo
+
+![Demo video](static/ddn-simple-chat-demo.mp4)
