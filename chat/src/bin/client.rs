@@ -116,10 +116,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    let outbound_stream = Box::pin(tokio_stream::wrappers::UnboundedReceiverStream::new(rx));
+    let inbound_stream = Box::pin(tokio_stream::wrappers::UnboundedReceiverStream::new(rx));
 
     let response_stream = client
-        .message(tonic::Request::new(outbound_stream))
+        .message(tonic::Request::new(inbound_stream))
         .await?
         .into_inner();
 
